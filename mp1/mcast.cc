@@ -86,6 +86,11 @@ public:
 
             return NULL;
       }
+
+      TimeI* getN(int n){
+      	if(n < TABLE_SIZE) 
+      		return table[n];
+      }
  
       void put(int key, int* vector) {
             int index = keyExists(key);
@@ -285,10 +290,47 @@ int getindex(int pid)
 	return -1;
 }
 
+/**
+	Auxilary function used to expand the vector when a new member is added to the chat.
+
+	arr - vector to be expanded
+	returns - new expanded vector with 0 as the newest entry
+*/
+int* expand_vector(int* arr) {
+	int* result = malloc(sizeOf(int) * MEMBER_COUNT);
+
+	for(int i = 0; i < MEMBER_COUNT - 1; i++ ) {
+		result[i] = arr[i];
+	}
+
+	delete[] arr;
+
+	result[MEMBER_COUNT - 1] = 0;
+
+	return result;
+}
+
+/*
+	Auxilary function for creating a new vector.
+
+	returns - a new vector initialized to 0
+*/
+int* create_vector() {
+	int* result = malloc(sizeOf(int) * MEMBER_COUNT);
+	for(int i = 0; i < MEMBER_COUNT; i ++)
+		result[i] = 0;
+
+	return result;
+}
+
 void mcast_join(int member) {
 	vector_len++;
 	curr_tmstmp.resize(vector_len);
 
+	// Joshua Code 
+	int* tVector = create_vector();
+
+	// Tommy Code
 	for(int i = 0; i < vector_len; i++)
 	{
 		curr_tmstmp[i] = 0;
@@ -296,6 +338,16 @@ void mcast_join(int member) {
 
 	pthread_mutex_lock(&member_lock);
 
+	//Joshua Code
+	for(int i = 0; i < TIMEKEEPER->getSize(); i++) {
+		TimeI* temp = TIMEKEEPER->getN(i);
+		int* tempVector = temp->getVector();
+		temp->setVector(expand_vector(tempVector));
+	}
+
+	TIMEKEEPER->put(TimeI(member, tVector));
+
+	//Tommy Code
 	if(total_sequence != mcast_num_members)
 	{
 
