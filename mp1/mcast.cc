@@ -6,11 +6,11 @@
 #include <pthread.h>
 #include <signal.h>
 #include <algorithm>
-
+#include <unistd.h>
 #include <vector>
 #include <list>
 #include <string>
-
+#include <queue>
 #include "mp1.h"
 
 using namespace std;
@@ -25,6 +25,12 @@ class node{
 		char* message;
 };
 
+struct msgNode {
+	int src;
+	int dest;
+	std::vector<int> timestamp;
+	char* msg;
+};
 /* 
 	HASH TABLE
 	Used to store the timestamps
@@ -105,13 +111,15 @@ public:
 
       int keyExists(int key) {
 
-      	for(int i = 0; size != 0 && i < TABLE_SIZE; i++)
+      	for(int i = 0; size != 0 && i < size; i++)
       		if(key == table[i]->getKey())
       			return i;
       	return -1;
       }
 
       int getSize() {
+      	//if(table == NULL)
+      	//	return 0;
       	return size;
       }
 
@@ -136,11 +144,34 @@ public:
       }
 };
 
+class CompareTime {
+public:
+    bool operator()(msgNode l, msgNode r)
+    {
+		std::vector<int> lTime = l.timestamp;
+		std::vector<int> rTime = r.timestamp;
+		int i, diffL = 0, diffR = 0;
+
+		for(int i = 0; i < lTime.size(); i++) {
+			if(lTime[i] < rTime[i])
+				diffL ++;
+			else if (lTime[i] > rTime[i])
+				diffR ++;
+		}
+
+		if(diffL > 0 && diffR == 0)
+			return true;
+
+		return false;
+    }
+};
+
 list<node> msg_queue;
 
 /* Josh's Section */
 Timekeeper* TIMEKEEPER;
-
+priority_queue<msgNode, vector<msgNode>, CompareTime> MESSAGES;
+int MESSAGE_SLEEP_TIME = 100;
 
 /* Tommy's Section */
 #define MESSAGE_ID 1
@@ -163,12 +194,10 @@ void sort_mcast();
 void send_nack(int curr, int next);
 
 
-
-
 void multicast_init(void) {
-    unicast_init();
-    TIMEKEEPER = new Timekeeper();
+	TIMEKEEPER = new Timekeeper();
 
+    unicast_init();   
 }
 
 char* preProcessMessage(int key, const char* message){
@@ -194,21 +223,106 @@ char* preProcessMessage(int key, const char* message){
 	return result;
 }
 
+bool isNewEvent(vector<int> l, vector<int> r) {
+	for(int i = 0; i < l.size(); i ++) {
+		if(l[i] > r[i])
+			return false;
+	}
+
+	return true;
+}
+
 void multicast(const char *message) {
     int member = my_id;
     TIMEKEEPER->incrementTime(member);
-
+    char* resultMessage = preProcessMessage(member, message);
 
     pthread_mutex_lock(&member_lock);
     for (int i = 0; i < mcast_num_members; i++) {
-        usend(mcast_members[i], message, strlen(message)+1);
+        usend(mcast_members[i], resultMessage, strlen(resultMessage)+1);
     }
     pthread_mutex_unlock(&member_lock);
 }
 
+msgNode postProcessMessage(int source, char* msg, int len){
+	int member;
+	sscanf(strtok(msg,":"),"%i", &member);
+
+	vector<int> timestamp;
+	for(int i = 0; i < TIMEKEEPER->getSize()-1; i++){
+		int temp = 0;
+		sscanf(strtok(msg," "),"%i", &temp);
+		timestamp.push_back(temp);
+	}
+	int temp = 0;
+		sscanf(strtok(NULL,":"),"%i", &temp);
+		timestamp.push_back(temp);
+	int dest = my_id;
+
+	char* resultMsg = strtok(NULL, "\0");
+
+	msgNode result;
+	result.src = source;
+	result.dest = dest;
+	result.timestamp = timestamp;
+	result.msg = resultMsg;
+
+	return result;
+}
+
+vector<int> updateTimeStamp(vector<int> curr, vector<int> msg) {
+	vector<int> result;
+	for(int i = 0; i < TIMEKEEPER->getSize(); i ++) {
+		if(curr[i] < msg[i])
+			result.push_back(msg[i]);
+		else
+			result.push_back(curr[i]);
+	}
+
+	return result;
+}
+
 void receive(int source, const char *message, int len) {
     assert(message[len-1] == 0);
-    deliver(source, message);
+    char * msgCpy = (char*) malloc(strlen(message));
+    strcpy(msgCpy, message);
+
+    msgNode entry = postProcessMessage(source, msgCpy, len);
+
+    pthread_mutex_lock(&member_lock);
+	int* currTime = TIMEKEEPER->get(entry.dest);
+	int index = TIMEKEEPER->keyExists(entry.dest);
+	pthread_mutex_unlock(&member_lock);  
+
+    std::vector<int> currTimestamp (currTime, currTime + sizeof(currTime) / sizeof(int));
+
+    if(!isNewEvent(currTimestamp, entry.timestamp)) {
+    	pthread_mutex_lock(&member_lock);
+    	TIMEKEEPER->put(entry.dest, updateTimeStamp(currTimestamp, entry.timestamp).data());
+		MESSAGES.push(entry);
+
+	    for (int i = 0; i < mcast_num_members; i++) {
+	     	if(i != index)
+	        	usend(mcast_members[i], message, len);
+	    }
+
+		pthread_mutex_unlock(&member_lock);    
+	}
+
+	msgNode currMsg;
+	while(!MESSAGES.empty()) {
+		if(MESSAGES.top().dest == my_id) {
+			pthread_mutex_lock(&member_lock);
+			currMsg = MESSAGES.top();
+			MESSAGES.pop();
+			TIMEKEEPER->incrementTime(entry.dest);
+			pthread_mutex_unlock(&member_lock);
+		}
+
+		deliver(currMsg.src, currMsg.msg);
+		sleep(MESSAGE_SLEEP_TIME);	
+	}
+    
 }
 
 
@@ -302,7 +416,7 @@ int* expand_vector(int* arr, int count) {
 		result[i] = arr[i];
 	}
 
-	delete[] arr;
+	//delete[] arr;
 
 	result[count - 1] = 0;
 
