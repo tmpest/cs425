@@ -81,6 +81,7 @@ int* create_vector() {
 }
 
 
+/*HELP*/
 /*	Reliable multicast with causal ordering and failure detection
  *	CS 425 MP1
  *	Arjan Singh Nirh
