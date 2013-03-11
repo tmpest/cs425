@@ -22,14 +22,105 @@ class node{
 		char* message;
 };
 
+
+
 list<node> msg_queue;
 
 /* Josh's Section */
-
+const int TABLE_SIZE = 24;
 
 
 /* Tommy's Section */
 
+
+
+/* 
+	HASH TABLE
+	Used to store the timestamps
+*/
+class TimeI {
+	private:
+	int key;
+	int* vector;
+
+	public:
+	TimeI(int key, int* vector) {
+	    this->key = key;
+	    this->vector = vector;
+	}
+
+	int getKey() {
+	    return key;
+	}
+
+	int* getVector() {
+	    return vector;
+	}
+
+	void setVector(int* vector) {
+		this->vector = vector;
+	}
+
+	void setVectorN(int n, int val) {
+		vector[n] = val;
+	}
+
+	~TimeI(){
+		delete[] vector;
+		vector = NULL;
+	}
+};
+ 
+class Timekeeper {
+private:
+      TimeI **table;
+      int size;
+public:
+      Timekeeper() {
+      		size = 0;
+            table = new TimeI*[TABLE_SIZE];
+            for (int i = 0; i < TABLE_SIZE; i++)
+                  table[i] = NULL;
+      }
+ 
+      int* get(int key) {
+      		if (table == NULL)
+      			return NULL;
+
+            for(int i = 0; i < TABLE_SIZE; i++){
+            	if(table[i]->getKey() == key)
+            		return table[i]->getVector();
+            }
+
+            return NULL;
+      }
+ 
+      void put(int key, int* vector) {
+            int index = keyExists(key);
+            if(index != -1) 
+            	table[index]->setVector(vector);
+            else{
+            	table[size] = new TimeI(key, vector);
+            	size ++;
+            }
+      }     
+
+      int keyExists(int key) {
+
+      	for(int i = 0; size != 0 && i < TABLE_SIZE; i++)
+      		if(key == table[i]->getKey())
+      			return i;
+      	return -1;
+      }
+ 
+      ~Timekeeper() {
+            for (int i = 0; i < TABLE_SIZE; i++)
+                  if (table[i] != NULL)
+
+                        delete table[i];
+            delete[] table;
+      }
+};
 
 
 void multicast_init(void) {
