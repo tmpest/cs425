@@ -24,10 +24,116 @@ class node{
 		char* message;
 };
 
+/* 
+	HASH TABLE
+	Used to store the timestamps
+*/
+const int TABLE_SIZE = 24;
+
+class TimeI {
+	private:
+	int key;
+	int* vector;
+
+	public:
+	TimeI(int key, int* vector) {
+	    this->key = key;
+	    this->vector = vector;
+	}
+
+	int getKey() {
+	    return key;
+	}
+
+	int* getVector() {
+	    return vector;
+	}
+
+	void setVector(int* vector) {
+		this->vector = vector;
+	}
+
+	void setVectorN(int n, int val) {
+		vector[n] = val;
+	}
+
+	~TimeI(){
+		delete[] vector;
+		vector = NULL;
+	}
+};
+ 
+class Timekeeper {
+private:
+      TimeI **table;
+      int size;
+public:
+      Timekeeper() {
+      		size = 0;
+            table = new TimeI*[TABLE_SIZE];
+            for (int i = 0; i < TABLE_SIZE; i++)
+                  table[i] = NULL;
+      }
+ 
+      int* get(int key) {
+      		if (table == NULL)
+      			return NULL;
+
+            for(int i = 0; i < TABLE_SIZE; i++){
+            	if(table[i]->getKey() == key)
+            		return table[i]->getVector();
+            }
+
+            return NULL;
+      }
+ 
+      void put(int key, int* vector) {
+            int index = keyExists(key);
+            if(index != -1) 
+            	table[index]->setVector(vector);
+            else{
+            	table[size] = new TimeI(key, vector);
+            	size ++;
+            }
+      }     
+
+      int keyExists(int key) {
+
+      	for(int i = 0; size != 0 && i < TABLE_SIZE; i++)
+      		if(key == table[i]->getKey())
+      			return i;
+      	return -1;
+      }
+
+      int getSize() {
+      	return size;
+      }
+
+      //Mem leaks probable...
+      void incrementTime(int key) {
+      	int index = keyExists(key);
+
+      	if(index != -1) {
+      		int* temp = table[index]->getVector();
+      		temp[index]++;
+      		table[index]->setVector(temp);
+      	}
+
+      }
+ 
+      ~Timekeeper() {
+            for (int i = 0; i < TABLE_SIZE; i++)
+                  if (table[i] != NULL)
+
+                        delete table[i];
+            delete[] table;
+      }
+};
+
 list<node> msg_queue;
 
 /* Josh's Section */
-
+Timekeeper* TIMEKEEPER;
 
 
 /* Tommy's Section */
@@ -50,15 +156,47 @@ int curr_i = 0;
 void sort_mcast();
 void send_nack(int curr, int next);
 
+
+
+
 void multicast_init(void) {
     unicast_init();
+    TIMEKEEPER = new Timekeeper();
+
+}
+
+const char* preProcessMessage(int key, const char* message){
+	char member[10] = "";
+	char timestamp[100] = "";
+	int* vect = TIMEKEEPER->get(key);
+
+	sprintf(member, "%d:", key);
+	char temp[10];
+	for(int i; i < TIMEKEEPER->getSize() - 1; i++) {
+		sprintf(temp, "%d ",  vect[i]);
+		strcat(timestamp, temp);
+	}
+	sprintf(temp, "%d:", vect[TIMEKEEPER->getSize()-1]);
+	strcat(timestamp,temp);
+
+	char* result = (char*) malloc(strlen(message) + strlen(member) + strlen(timestamp));
+
+	strcat(result, member);
+	strcat(result,timestamp);
+	strcat(result,message);
+
+	return (const char*)result;
 }
 
 void multicast(const char *message) {
-    int i;
+    int member = my_id;
+    TIMEKEEPER->incrementTime(member);
+
+
+
 
     pthread_mutex_lock(&member_lock);
-    for (i = 0; i < mcast_num_members; i++) {
+    for (int i = 0; i < mcast_num_members; i++) {
         usend(mcast_members[i], message, strlen(message)+1);
     }
     pthread_mutex_unlock(&member_lock);
