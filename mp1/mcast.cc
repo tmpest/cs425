@@ -6,7 +6,9 @@
 #include <pthread.h>
 #include <signal.h>
 
+#include <vector>
 #include <list>
+#include <string>
 
 #include "mp1.h"
 
@@ -15,7 +17,7 @@ using namespace std;
 class node{
 
 	public:
-		int *timestamp;
+		vector<int> timestamp;
 		int length;
 		int source;
 		int seq_num;
@@ -29,8 +31,24 @@ list<node> msg_queue;
 
 
 /* Tommy's Section */
+#define MESSAGE_ID 1
+#define NACK_ID 2
+#define HEARTBEAT_ID 3
+#define HEARTBEAT_INTERVAL 6
+#define PROCESS_FAILURE -666
 
 
+int curr_seq_num = 0;
+int total_sequence = 0;
+vector<int> prev_sequence;
+vector<int> curr_sequence;
+vector<int> mcast_mapping;
+vector<int> curr_tmstmp;
+int vector_len = 0;
+int curr_i = 0;
+
+void sort_mcast();
+void send_nack(int curr, int next);
 
 void multicast_init(void) {
     unicast_init();
@@ -51,12 +69,168 @@ void receive(int source, const char *message, int len) {
     deliver(source, message);
 }
 
-void mcast_join(int member) {
 
+
+
+void check_messages(int curr_pid, vector<int> vector_in, int * is_buffer, int * reject, int in_buffer)
+{
+	for(int i = 0; i < vector_len; i++)
+	{
+		if(prev_sequence[i] = PROCESS_FAILURE)
+			continue;
+
+		if(i != curr_pid)
+		{
+			if(vector_in[i] < curr_tmstmp[i])
+			{
+				*reject = 1;
+				return;
+			}
+			if(curr_tmstmp[i] != vector_in[i])
+			{
+				*is_buffer = 1;
+
+				if(!in_buffer)
+					for(int j = curr_tmstmp[i] + 1; j < vector_in[i]; j++)
+						send_nack(j, mcast_mapping[i]);
+			}
+		}
+
+		else
+		{
+			if(vector_in[i] <= curr_tmstmp[i])
+			{
+				*reject = 1;
+				return;
+			}
+			if(vector_in[i] - curr_tmstmp[i] > 1)
+			{
+				*is_buffer = 1;
+
+				if(!in_buffer)
+					for(int j = curr_tmstmp[i] + 1; j < vector_in[i]; j++)
+						send_nack(j, mcast_mapping[i]);
+			}
+		}
+	}
 }
 
+void send_nack(int curr, int next)
+{
+	char message[5];
+	sprintf(message, "%d, %d", NACK_ID, curr);
+	message[4] = 0;
 
+	usend(next, message, 5);
+}
 
+void addnode(char * mess, vector<int> tmstmp, int src)
+{
+	node * curr = new node;
+
+	curr->source = src;
+	curr->timestamp = tmstmp;
+	strcpy(curr->message, mess);
+
+	//for(int i = 0; i < vector_len; i++)
+	//	curr->timestamp[i] = tmstmp[i];
+
+	msg_queue.push_back(*curr);
+}
+
+int getindex(int pid)
+{
+	for( int i = 0; i < mcast_mapping.size(); i++ )
+		if(mcast_mapping[i] == pid)
+			return i;
+
+	return -1;
+}
+
+void mcast_join(int member) {
+	vector_len++;
+	curr_tmstmp.resize(vector_len);
+
+	for(int i = 0; i < vector_len; i++)
+	{
+		curr_tmstmp[i] = 0;
+	}
+
+	pthread_mutex_lock(&member_lock);
+
+	if(total_sequence != mcast_num_members)
+	{
+
+		prev_sequence.resize(mcast_num_members, -1);
+		curr_sequence.resize(mcast_num_members, 0);
+
+		total_sequence = mcast_num_members;
+	}
+
+	pthread_mutex_unlock(&member_lock);
+
+	sort_mcast();
+}
+
+void sort_mcast()
+{
+	mcast_mapping.resize(mcast_num_members, 0);
+
+	for(int i = 0; i < mcast_num_members; i++)
+	{
+		mcast_mapping[i] = mcast_members[i];
+	}
+
+	sort(mcast_mapping.begin(), mcast_mapping.end());
+}
+
+void* heartbeat()
+{
+	int n = 0;
+	int counter = 0;
+
+	while(1)
+	{
+		counter++;
+		pthread_mutex_lock(&member_lock);
+
+		//Send heartbeats
+		for(int i = 0; i < mcast_num_members; i++)
+		{
+			if(mcast_members[i] == my_id)
+			{
+				curr_i = i;
+				continue;
+			}
+			curr_seq_num++;
+			char message[5];
+			sprintf(message, "%d, %d", HEARTBEAT_ID, total_sequence);
+			message[4] = 0;
+			usend(mcast_members[i], message, strlen(message) + 1);
+		}
+
+		pthread_mutex_unlock(&member_lock);
+
+		if(counter % 4 == 0)
+		{
+			for(int i = 0; i < total_sequence; i++)
+			{
+				if( i != curr_i && curr_sequence[i] <= prev_sequence[i] && curr_sequence[i] != -1)
+				{
+					curr_sequence[i] = PROCESS_FAILURE; //failure
+					pthread_mutex_lock(&member_lock);
+					mcast_num_members--;
+					pthread_mutex_unlock(&member_lock);
+				}
+
+				prev_sequence[i] = curr_sequence[i];
+			}
+		}
+
+		sleep(HEARTBEAT_INTERVAL);
+	}
+
+}
 
 
 
@@ -481,8 +655,8 @@ void mcast_join(int member) {
 // }
 
 
-// /* Buffer message + timestamp to linked list
-// */
+/* Buffer message + timestamp to linked list
+*/
 // void add_node(char* original_message,int* incoming_timestamp,int source){
 
 
@@ -516,10 +690,8 @@ void mcast_join(int member) {
 // 		tail = curr;
 // }
 
-// /* Concatenate timestamp to beginning of message
-// *	Allocate new memory and append string
-// *	The caller is responsible for deallocating the memory
-// */
+
+
 // char* concatenate_timestamp(const char* message){
 	
 // 	char* new_message = (char*) malloc(256);
