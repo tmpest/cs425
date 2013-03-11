@@ -5,6 +5,7 @@
 #include <iostream>
 #include <pthread.h>
 #include <signal.h>
+#include <algorithm>
 
 #include <vector>
 #include <list>
@@ -170,7 +171,7 @@ void multicast_init(void) {
 
 }
 
-const char* preProcessMessage(int key, const char* message){
+char* preProcessMessage(int key, const char* message){
 	char member[10] = "";
 	char timestamp[100] = "";
 	int* vect = TIMEKEEPER->get(key);
@@ -190,14 +191,12 @@ const char* preProcessMessage(int key, const char* message){
 	strcat(result,timestamp);
 	strcat(result,message);
 
-	return (const char*)result;
+	return result;
 }
 
 void multicast(const char *message) {
     int member = my_id;
     TIMEKEEPER->incrementTime(member);
-
-
 
 
     pthread_mutex_lock(&member_lock);
@@ -296,16 +295,16 @@ int getindex(int pid)
 	arr - vector to be expanded
 	returns - new expanded vector with 0 as the newest entry
 */
-int* expand_vector(int* arr) {
-	int* result = malloc(sizeOf(int) * MEMBER_COUNT);
+int* expand_vector(int* arr, int count) {
+	int* result = (int*) malloc(sizeof(int) * count);
 
-	for(int i = 0; i < MEMBER_COUNT - 1; i++ ) {
+	for(int i = 0; i < count - 1; i++ ) {
 		result[i] = arr[i];
 	}
 
 	delete[] arr;
 
-	result[MEMBER_COUNT - 1] = 0;
+	result[count - 1] = 0;
 
 	return result;
 }
@@ -315,9 +314,9 @@ int* expand_vector(int* arr) {
 
 	returns - a new vector initialized to 0
 */
-int* create_vector() {
-	int* result = malloc(sizeOf(int) * MEMBER_COUNT);
-	for(int i = 0; i < MEMBER_COUNT; i ++)
+int* create_vector(int count) {
+	int* result = (int*) malloc(sizeof(int) * count);
+	for(int i = 0; i < count; i ++)
 		result[i] = 0;
 
 	return result;
@@ -328,7 +327,7 @@ void mcast_join(int member) {
 	curr_tmstmp.resize(vector_len);
 
 	// Joshua Code 
-	int* tVector = create_vector();
+	int* tVector = create_vector(TIMEKEEPER->getSize() + 1);
 
 	// Tommy Code
 	for(int i = 0; i < vector_len; i++)
@@ -342,10 +341,10 @@ void mcast_join(int member) {
 	for(int i = 0; i < TIMEKEEPER->getSize(); i++) {
 		TimeI* temp = TIMEKEEPER->getN(i);
 		int* tempVector = temp->getVector();
-		temp->setVector(expand_vector(tempVector));
+		temp->setVector(expand_vector(tempVector, TIMEKEEPER->getSize() + 1));
 	}
 
-	TIMEKEEPER->put(TimeI(member, tVector));
+	TIMEKEEPER->put(member, tVector);
 
 	//Tommy Code
 	if(total_sequence != mcast_num_members)
