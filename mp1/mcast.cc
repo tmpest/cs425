@@ -177,6 +177,7 @@ public:
 };
 
 list<node> msg_queue;
+list<node> sent_msgs;
 
 /* Josh's Section */
 Timekeeper* TIMEKEEPER;
@@ -355,8 +356,32 @@ void receive(int source, const char *message, int len) {
     }
 }
 
+void store(char * mess, int len, int n)
+{
+	node * curr = new node;
 
+	curr->message = (char*) malloc(len * sizeof(char));
+	strcpy(curr->message, mess);
+	curr->length = len;
+	curr->seq_num = n;
 
+	sent_msgs.push_back(*curr);
+}
+
+void resend(int n, int source)
+{
+	if(sent_msgs.empty())
+		return;
+
+	for (list<int>::iterator it=sent_msgs.begin(); it != sent_msgs.end(); ++it)
+    	if(it->seq_num == n)
+    	{
+    		usend(source, it->message, it->length);
+    		return;
+    	}
+    	
+
+}
 
 void check_messages(int curr_pid, vector<int> vector_in, int * is_buffer, int * reject, int in_buffer)
 {
@@ -424,6 +449,16 @@ void addnode(char * mess, vector<int> tmstmp, int src)
 	msg_queue.push_back(*curr);
 }
 
+void removenode(int deliver)
+{
+	if(deliver)
+	{
+		deliver(msg_queue.front().source, msg_queue.front().message);
+	}
+
+	msg_queue.pop_front();
+}
+
 int getindex(int pid)
 {
 	for( int i = 0; i < mcast_mapping.size(); i++ )
@@ -479,7 +514,7 @@ void mcast_join(int member) {
 		curr_tmstmp[i] = 0;
 	}
 
-	pthread_mutex_lock(&member_lock);
+	thread_mutex_lock(&member_lock);
 
 	//Joshua Code
 	for(int i = 0; i < TIMEKEEPER->getSize(); i++) {
