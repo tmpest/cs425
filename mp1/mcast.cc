@@ -134,6 +134,16 @@ public:
       	}
 
       }
+
+      void print() {
+      	for(int i = 0; i < size; i++) {
+      		printf("%i : ", table[i]->getKey());
+      		for( int j = 0; j < size; j++) {
+      			printf("%i ", (table[i]->getVector())[j]);
+      		}
+      		printf("\n");
+      	}
+      }
  
       ~Timekeeper() {
             for (int i = 0; i < TABLE_SIZE; i++)
@@ -220,19 +230,32 @@ char* preProcessMessage(int key, const char* message){
 	strcat(result,timestamp);
 	strcat(result,message);
 
+	printf("%s\n", result );
 	return result;
 }
 
-bool isNewEvent(vector<int> l, vector<int> r) {
-	for(int i = 0; i < l.size(); i ++) {
-		if(l[i] > r[i])
-			return false;
-	}
+/*
+	Checks to see if an event is old. If the timestamps are euqal or the event one is equal to some components of the current one and less than other components then the event time is considered old.
+*/
+bool isOldEvent(vector<int> curr, vector<int> event) {
+	int diffL = 0, diffR = 0;
 
-	return true;
+	for(int i = 0; i < curr.size(); i ++) {
+		if(curr[i] > event[i])
+			diffL++;
+		else if (curr[i] < event[i])
+			diffR++;
+	}
+	if((diffL + diffR) == 0)
+		return true;
+	else if (diffL > 0 && diffR == 0)
+		return true;
+	else
+		return false;
 }
 
 void multicast(const char *message) {
+	//TIMEKEEPER->print();
     int member = my_id;
     TIMEKEEPER->incrementTime(member);
     char* resultMessage = preProcessMessage(member, message);
@@ -242,6 +265,8 @@ void multicast(const char *message) {
         usend(mcast_members[i], resultMessage, strlen(resultMessage)+1);
     }
     pthread_mutex_unlock(&member_lock);
+    //TIMEKEEPER->print();
+    deliver(my_id, message);
 }
 
 msgNode postProcessMessage(int source, char* msg, int len){
@@ -251,12 +276,13 @@ msgNode postProcessMessage(int source, char* msg, int len){
 	vector<int> timestamp;
 	for(int i = 0; i < TIMEKEEPER->getSize()-1; i++){
 		int temp = 0;
-		sscanf(strtok(msg," "),"%i", &temp);
+		sscanf(strtok(NULL," "),"%i", &temp);
 		timestamp.push_back(temp);
 	}
+	
 	int temp = 0;
-		sscanf(strtok(NULL,":"),"%i", &temp);
-		timestamp.push_back(temp);
+	sscanf(strtok(NULL,":"),"%i", &temp);
+	timestamp.push_back(temp);
 	int dest = my_id;
 
 	char* resultMsg = strtok(NULL, "\0");
@@ -270,59 +296,63 @@ msgNode postProcessMessage(int source, char* msg, int len){
 	return result;
 }
 
-vector<int> updateTimeStamp(vector<int> curr, vector<int> msg) {
+vector<int> updateTimeStamp(vector<int> curr, vector<int> msg, int index) {
 	vector<int> result;
 	for(int i = 0; i < TIMEKEEPER->getSize(); i ++) {
-		if(curr[i] < msg[i])
-			result.push_back(msg[i]);
+		if( i == index)
+			result.push_back(curr[i] + 1);
 		else
-			result.push_back(curr[i]);
+			if(curr[i] < msg[i])
+				result.push_back(msg[i]);
+			else
+				result.push_back(curr[i]);
 	}
 
 	return result;
 }
 
+/*
+	Simple test to see if a message is a Chat Message or a Heartbeat message. Heatbeat messages never contain :'s and Chat messages always will.
+*/
+bool isChatMessage(const char* msg) {
+	const void * test = strchr(msg, ':');
+	return test != NULL;
+}
+
 void receive(int source, const char *message, int len) {
+	//TIMEKEEPER->print();
+
+	printf("%s\n", message);
     assert(message[len-1] == 0);
-    char * msgCpy = (char*) malloc(strlen(message));
-    strcpy(msgCpy, message);
 
-    msgNode entry = postProcessMessage(source, msgCpy, len);
+    if(isChatMessage(message)) {
+		char * msgCpy = (char*) malloc(strlen(message));
+	    strcpy(msgCpy, message);
 
-    pthread_mutex_lock(&member_lock);
-	int* currTime = TIMEKEEPER->get(entry.dest);
-	int index = TIMEKEEPER->keyExists(entry.dest);
-	pthread_mutex_unlock(&member_lock);  
+	    msgNode entry = postProcessMessage(source, msgCpy, len);
 
-    std::vector<int> currTimestamp (currTime, currTime + sizeof(currTime) / sizeof(int));
+	    pthread_mutex_lock(&member_lock);
+		int* currTime = TIMEKEEPER->get(entry.dest);
+		int index = TIMEKEEPER->keyExists(entry.dest);
+		pthread_mutex_unlock(&member_lock);  
 
-    if(!isNewEvent(currTimestamp, entry.timestamp)) {
-    	pthread_mutex_lock(&member_lock);
-    	TIMEKEEPER->put(entry.dest, updateTimeStamp(currTimestamp, entry.timestamp).data());
-		MESSAGES.push(entry);
+	    
+	   	vector<int> currTimestamp (currTime, currTime + sizeof(currTime) / sizeof(int));
 
-	    for (int i = 0; i < mcast_num_members; i++) {
-	     	if(i != index)
-	        	usend(mcast_members[i], message, len);
-	    }
+	    if(!isOldEvent(currTimestamp, entry.timestamp)) {
+	    	deliver(entry.src, entry.msg);
+	    	pthread_mutex_lock(&member_lock);
+	    	TIMEKEEPER->put(entry.dest, updateTimeStamp(currTimestamp, entry.timestamp, index).data());
+			    
 
-		pthread_mutex_unlock(&member_lock);    
-	}
-
-	msgNode currMsg;
-	while(!MESSAGES.empty()) {
-		if(MESSAGES.top().dest == my_id) {
-			pthread_mutex_lock(&member_lock);
-			currMsg = MESSAGES.top();
-			MESSAGES.pop();
-			TIMEKEEPER->incrementTime(entry.dest);
-			pthread_mutex_unlock(&member_lock);
+		    for (int i = 0; i < mcast_num_members; i++) {
+		     	if(i != index)
+		        	usend(mcast_members[i], message, len);
+		    }
+		    pthread_mutex_unlock(&member_lock);
+		    
 		}
-
-		deliver(currMsg.src, currMsg.msg);
-		sleep(MESSAGE_SLEEP_TIME);	
-	}
-    
+    }
 }
 
 
