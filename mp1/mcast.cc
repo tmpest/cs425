@@ -81,7 +81,8 @@ public:
             for (int i = 0; i < TABLE_SIZE; i++)
                   table[i] = NULL;
       }
- 
+ 	
+
       int* get(int key) {
       		if (table == NULL)
       			return NULL;
@@ -109,6 +110,7 @@ public:
             }
       }     
 
+      // check if the key is in the table and if so returns its index
       int keyExists(int key) {
 
       	for(int i = 0; size != 0 && i < size; i++)
@@ -123,7 +125,7 @@ public:
       	return size;
       }
 
-      //Mem leaks probable...
+      //increments the time of the process given its key
       void incrementTime(int key) {
       	int index = keyExists(key);
 
@@ -135,6 +137,7 @@ public:
 
       }
 
+      // Debug print statement to see the table from the console
       void print() {
       	for(int i = 0; i < size; i++) {
       		printf("%i : ", table[i]->getKey());
@@ -154,6 +157,7 @@ public:
       }
 };
 
+// comparison function for priority queue
 class CompareTime {
 public:
     bool operator()(msgNode l, msgNode r)
@@ -211,6 +215,12 @@ void multicast_init(void) {
     unicast_init();   
 }
 
+/*
+	This takes the message and appends it with the origin process id seperated by a : then the timestamp of the origin process deliminated by spaces followed by a : and finnally the message.
+
+	ex
+	P_ID:0 0 0 0:Message Text Here
+*/
 char* preProcessMessage(int key, const char* message){
 	char member[10] = "";
 	char timestamp[100] = "";
@@ -270,6 +280,9 @@ void multicast(const char *message) {
     deliver(my_id, message);
 }
 
+/*
+	Parses the message to get the information contained in the string. It returns an object containing the destination, source, timestamp, and message text.
+*/
 msgNode postProcessMessage(int source, char* msg, int len){
 	int member;
 	sscanf(strtok(msg,":"),"%i", &member);
@@ -297,6 +310,9 @@ msgNode postProcessMessage(int source, char* msg, int len){
 	return result;
 }
 
+/*
+	Updates the current timestamp given the event timestamp to match any components greater than the current timestamp component and additionally on the component for the respective process then it will simply increment it.
+*/
 vector<int> updateTimeStamp(vector<int> curr, vector<int> msg, int index) {
 	vector<int> result;
 	for(int i = 0; i < TIMEKEEPER->getSize(); i ++) {
@@ -326,6 +342,7 @@ void receive(int source, const char *message, int len) {
 	printf("%s\n", message);
     assert(message[len-1] == 0);
 
+    // Checks if the message is a chat message or a heartbeat
     if(isChatMessage(message)) {
 		char * msgCpy = (char*) malloc(strlen(message));
 	    strcpy(msgCpy, message);
@@ -340,6 +357,7 @@ void receive(int source, const char *message, int len) {
 	    
 	   	vector<int> currTimestamp (currTime, currTime + sizeof(currTime) / sizeof(int));
 
+	   	// If the message is old then drop it
 	    if(!isOldEvent(currTimestamp, entry.timestamp)) {
 	    	deliver(entry.src, entry.msg);
 	    	pthread_mutex_lock(&member_lock);
